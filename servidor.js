@@ -9,6 +9,7 @@
 // ============================================================
 
 const express = require('express');
+const { DatabaseSync } = require('node:sqlite');
 const app = express();
 
 // Faz o Express entender JSON no corpo das requisicoes
@@ -18,8 +19,16 @@ app.use(express.json());
 // Os dados moram aqui, na memoria. Somem quando o servidor cai.
 // (Na Aula 03 isso vira banco de dados.)
 // ------------------------------------------------------------
-const treinos = [];
-let proximoId = 1;
+// Conecta ao banco (cria o arquivo treinos.db se nao existir)
+const db = new DatabaseSync('treinos.db');
+// Garante que a tabela existe
+db.exec(`
+CREATE TABLE IF NOT EXISTS treinos (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+nome TEXT NOT NULL,
+duracao INTEGER NOT NULL
+)
+`);
 
 // ------------------------------------------------------------
 // Validacao
@@ -42,40 +51,40 @@ return null ;
 // GET /treinos - lista todos os treinos
 // ------------------------------------------------------------
 // [PROF] Tem espaco dentro da rota. O Express compara letra por letra, entao '/ treinos ' nunca bate com /treinos. Tira todos os espacos de dentro das aspas.
-app.get('/ treinos ', (req , res) => {
+app.get('/treinos', (req, res) => {
+const treinos = db.prepare('SELECT * FROM treinos').all();
 res.status(200).json(treinos);
 });
-
 
 // ------------------------------------------------------------
 // GET /treinos/:id - busca um treino pelo id (404 se nao existir)
 // ------------------------------------------------------------
-app.get('/treinos/:id', (req, res)=>{
-    // [PROF] number com n minusculo nao existe no JavaScript. Eh Number, com N maiusculo. Do jeito que ta o servidor quebra nessa rota.
-    const id=number( req.params.id);
-    const treino= treinos.find((t)=>t.id===id);
-    if (treino === undefined){
-        return res.status(404).json({erro:"treino não encontrado"});
-    }
-    res.status(200).json(treino);
+app.get('/treinos/:id', (req, res) => {
+const id = Number(req.params.id);
+const treino = db.prepare('SELECT * FROM treinos WHERE id = ?').get(id);
+if (treino === undefined) {
+return res.status(404).json({ erro: 'Treino nao encontrado.' });
+}
+res.status(200).json(treino);
 });
 // ------------------------------------------------------------
 // POST /treinos - cria um treino (400 se os dados forem invalidos)
 // ------------------------------------------------------------
 // [PROF] Tem espaco dentro da rota. O Express compara letra por letra, entao '/ treinos ' nunca bate com /treinos. Tira todos os espacos de dentro das aspas.
-app.post('/ treinos ', (req , res) => {
+app.post('/treinos', (req, res) => {
 const erro = validarTreino(req.body);
-if (erro !== null ){
-return res.status (400).json({ erro: erro });
+if (erro !== null){
+return res.status(400).json({ erro: erro });
 }
-const treino = {
-id: proximoId ,
-nome: req.body.nome ,
-duracao: req.body.duracao
-};
-proximoId = proximoId + 1;
-treinos.push(treino);
-res.status(201).json(treino);
+// Insere no banco
+const resultado = db
+.prepare('INSERT INTO treinos (nome, duracao) VALUES (?, ?)')
+.run(req.body.nome, req.body.duracao);
+// Busca o treino recem-criado para devolver com o id gerado
+const novo = db
+.prepare('SELECT * FROM treinos WHERE id = ?')
+.get(resultado.lastInsertRowid);
+res.status(201).json(novo);
 });
 
 
@@ -83,22 +92,20 @@ res.status(201).json(treino);
 // PUT /treinos/:id - substitui um treino
 // ------------------------------------------------------------
 // [PROF] A rota eh /treinos, no plural. E na linha de baixo tem o mesmo problema do number minusculo.
-app.put ('/treino/:id' , (req,res)=>{
-    const id = number (req.params.id);
-    const treino = treinos.find((t)=> t.id === id);
-    if (treino === undefined){
-        // [PROF] Faltou o return.
-        res.status(404).json({erro:"Não encontrado"});
-    }
-    const erro = validarTreino(req.body);
-    if(erro!== null){
-        // [PROF] Faltou o return. E o campo eh erro, tudo minusculo.
-        res.status(400).json({Erro:erro});
-    }
-    // [PROF] req.body.home? O campo eh nome.
-    treino.nome= req.body.home;
-    treino.duracao= req.body.duracao;
-    res.status(200).json(treino);
+app.put('/treinos/:id', (req, res) => {
+const id = Number(req.params.id);
+const treino = db.prepare('SELECT * FROM treinos WHERE id = ?').get(id);
+if (treino === undefined) {
+return res.status(404).json({ erro: 'Treino nao encontrado.' });
+}
+const erro = validarTreino(req.body);
+if (erro !== null){
+return res.status(400).json({ erro: erro });
+}
+db.prepare('UPDATE treinos SET nome = ?, duracao = ? WHERE id = ?')
+.run(req.body.nome, req.body.duracao, id);
+const atualizado = db.prepare('SELECT * FROM treinos WHERE id = ?').get(id);
+res.status(200).json(atualizado);
 });
 
 
@@ -106,16 +113,15 @@ app.put ('/treino/:id' , (req,res)=>{
 // DELETE /treinos/:id - remove um treino
 // ------------------------------------------------------------
 // [PROF] Tem espaco dentro da rota. O Express compara letra por letra, entao '/ treinos ' nunca bate com /treinos. Tira todos os espacos de dentro das aspas.
-app.delete('/ treinos /: id ', (req , res) => {
+app.delete('/treinos/:id', (req, res) => {
 const id = Number(req.params.id);
-const posicao = treinos.findIndex((t) => t.id === id);
-if (posicao === -1) {
-return res.status (404).json({ erro: "Treino nao encontrado ." });
+const treino = db.prepare('SELECT * FROM treinos WHERE id = ?').get(id);
+if (treino === undefined) {
+return res.status(404).json({ erro: 'Treino nao encontrado.' });
 }
-treinos.splice(posicao , 1);
-res.status (204).end();
+db.prepare('DELETE FROM treinos WHERE id = ?').run(id);
+res.status(204).end();
 });
-
 
 // ------------------------------------------------------------
 const PORTA = 3000;
